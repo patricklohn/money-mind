@@ -69,7 +69,7 @@ const Settings: React.FC = () => {
   const [showMfaSetup, setShowMfaSetup] = useState(false);
 
   // Buscar perfil do usuário
-  const { data: profileData, isLoading } = useQuery({
+  const { isLoading } = useQuery({
     queryKey: ['profile'],
     queryFn: () => authService.getProfile(),
     onSuccess: (data) => {
@@ -143,7 +143,7 @@ const Settings: React.FC = () => {
     }
   });
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 

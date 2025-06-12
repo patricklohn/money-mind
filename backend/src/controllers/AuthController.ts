@@ -171,7 +171,7 @@ export class AuthController {
       const newToken = jwt.sign(
         { id: user.id },
         process.env.JWT_SECRET || 'default_secret',
-        { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+        { expiresIn: process.env.JWT_EXPIRES_IN || '24h' } as jwt.SignOptions
       );
       
       // Remover senha e segredo MFA da resposta

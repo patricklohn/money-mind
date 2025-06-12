@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Grid, Paper, CircularProgress, Button, LinearProgress, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Grid, Paper, CircularProgress, Button } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { goalService } from '../services/api';

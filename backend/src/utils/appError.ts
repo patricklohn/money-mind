@@ -28,8 +28,9 @@ export const createNotFoundError = (originalUrl: string): AppError => {
  * @param id Identificador da entidade
  * @returns AppError com status 404
  */
-export const createEntityNotFoundError = (entity: string, id: string | number): AppError => {
-  return new AppError(`${entity} com id ${id} não encontrado`, 404);
+export const createEntityNotFoundError = (entity: string, id?: string | number): AppError => {
+  const message = id ? `${entity} com id ${id} não encontrado` : `${entity} não encontrado`;
+  return new AppError(message, 404);
 };
 
 /**

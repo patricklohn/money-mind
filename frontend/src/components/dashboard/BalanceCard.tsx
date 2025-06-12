@@ -6,7 +6,6 @@ interface BalanceCardProps {
   title: string;
   amount: number;
   trend: number;
-  color: string;
   trendInverted?: boolean;
 }
 
@@ -18,8 +17,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
   title, 
   amount, 
   trend, 
-  color,
-  trendInverted = false
+  trendInverted = false 
 }) => {
   // Formatar valor para moeda brasileira
   const formatCurrency = (value: number): string => {

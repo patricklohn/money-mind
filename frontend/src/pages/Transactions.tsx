@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Grid, Paper, CircularProgress, Button, Chip, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, Button, Chip, IconButton, Tooltip } from '@mui/material';
 import { Add as AddIcon, FilterList as FilterIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { transactionService } from '../services/api';

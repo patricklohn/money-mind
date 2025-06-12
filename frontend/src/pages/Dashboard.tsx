@@ -46,8 +46,9 @@ const Dashboard: React.FC = () => {
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} md={6}>
           <BalanceCard 
-            totalBalance={dashboard?.totalBalance || 0} 
-            wallets={dashboard?.wallets?.data || []} 
+            title="Saldo Total"
+            amount={dashboard?.totalBalance || 0} 
+            trend={dashboard?.balanceTrend || 0}
           />
         </Grid>
         <Grid item xs={12} md={6}>

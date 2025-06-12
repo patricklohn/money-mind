@@ -1,9 +1,5 @@
-import { TransactionInstance, TransactionAttributes } from '../models/Transaction';
-import { WalletInstance } from '../models/Wallet';
-import { CategoryInstance } from '../models/Category';
+import prisma from '../lib/prisma';
 import { AppError, createEntityNotFoundError } from '../utils/appError';
-import { sequelize } from '../config/database';
-import { Op } from 'sequelize';
 
 /**
  * Serviço para gerenciar transações financeiras
@@ -20,416 +16,374 @@ export class TransactionService {
       type?: 'income' | 'expense' | 'transfer';
       categoryId?: number;
       walletId?: number;
-      search?: string;
-      page?: number;
+      minAmount?: number;
+      maxAmount?: number;
       limit?: number;
-    }
+      offset?: number;
+    } = {}
   ) {
-    const {
-      startDate,
-      endDate,
-      type,
-      categoryId,
-      walletId,
-      search,
-      page = 1,
-      limit = 10
-    } = filters;
-
-    // Construir condições de busca
-    const where: any = { userId };
-
-    if (startDate) {
-      where.transactionDate = {
-        ...where.transactionDate,
-        [Op.gte]: startDate
+    try {
+      const where: any = {
+        userId: userId
       };
-    }
 
-    if (endDate) {
-      where.transactionDate = {
-        ...where.transactionDate,
-        [Op.lte]: endDate
-      };
-    }
-
-    if (type) {
-      where.transactionType = type;
-    }
-
-    if (categoryId) {
-      where.categoryId = categoryId;
-    }
-
-    if (walletId) {
-      where.walletId = walletId;
-    }
-
-    if (search) {
-      where.description = {
-        [Op.iLike]: `%${search}%`
-      };
-    }
-
-    // Calcular offset para paginação
-    const offset = (page - 1) * limit;
-
-    // Buscar transações
-    const { count, rows } = await TransactionInstance.findAndCountAll({
-      where,
-      include: [
-        {
-          model: CategoryInstance,
-          as: 'category',
-          attributes: ['id', 'name', 'icon', 'color']
-        },
-        {
-          model: WalletInstance,
-          as: 'wallet',
-          attributes: ['id', 'name', 'icon', 'walletType']
+      // Filtro por data
+      if (filters.startDate || filters.endDate) {
+        where.transactionDate = {};
+        if (filters.startDate) {
+          where.transactionDate.gte = filters.startDate;
         }
-      ],
-      order: [['transactionDate', 'DESC']],
-      limit,
-      offset
-    });
-
-    // Calcular total de páginas
-    const totalPages = Math.ceil(count / limit);
-
-    return {
-      transactions: rows,
-      pagination: {
-        total: count,
-        page,
-        limit,
-        totalPages
+        if (filters.endDate) {
+          where.transactionDate.lte = filters.endDate;
+        }
       }
-    };
+
+      // Filtro por tipo
+      if (filters.type) {
+        where.transactionType = filters.type;
+      }
+
+      // Filtro por categoria
+      if (filters.categoryId) {
+        where.categoryId = filters.categoryId;
+      }
+
+      // Filtro por carteira
+      if (filters.walletId) {
+        where.walletId = filters.walletId;
+      }
+
+      // Filtro por valor
+      if (filters.minAmount !== undefined || filters.maxAmount !== undefined) {
+        where.amount = {};
+        if (filters.minAmount !== undefined) {
+          where.amount.gte = filters.minAmount;
+        }
+        if (filters.maxAmount !== undefined) {
+          where.amount.lte = filters.maxAmount;
+        }
+      }
+
+      const transactions = await prisma.transaction.findMany({
+        where,
+        include: {
+          category: true,
+          wallet: true
+        },
+        orderBy: {
+          transactionDate: 'desc'
+        },
+        take: filters.limit || 100,
+        skip: filters.offset || 0
+      });
+
+      const total = await prisma.transaction.count({ where });
+
+      return {
+        transactions,
+        total,
+        hasMore: (filters.offset || 0) + transactions.length < total
+      };
+    } catch (error) {
+      throw new AppError('Erro ao buscar transações', 500);
+    }
   }
 
   /**
-   * Buscar uma transação pelo ID
+   * Buscar transação por ID
    */
   public static async getTransactionById(id: number, userId: number) {
-    const transaction = await TransactionInstance.findOne({
-      where: { id, userId },
-      include: [
-        {
-          model: CategoryInstance,
-          as: 'category',
-          attributes: ['id', 'name', 'icon', 'color']
-        },
-        {
-          model: WalletInstance,
-          as: 'wallet',
-          attributes: ['id', 'name', 'icon', 'walletType']
-        }
-      ]
-    });
-
-    if (!transaction) {
-      throw createEntityNotFoundError('Transação', id);
-    }
-
-    return transaction;
-  }
-
-  /**
-   * Criar uma nova transação
-   */
-  public static async createTransaction(
-    data: Omit<TransactionAttributes, 'id' | 'createdAt' | 'updatedAt'>,
-    userId: number
-  ) {
-    // Iniciar transação no banco de dados
-    const transaction = await sequelize.transaction();
-
     try {
-      // Verificar se a carteira existe e pertence ao usuário
-      const wallet = await WalletInstance.findOne({
-        where: { id: data.walletId, userId },
-        transaction
-      });
-
-      if (!wallet) {
-        throw createEntityNotFoundError('Carteira', data.walletId);
-      }
-
-      // Verificar se a categoria existe
-      const category = await CategoryInstance.findOne({
+      const transaction = await prisma.transaction.findFirst({
         where: {
-          id: data.categoryId,
-          [Op.or]: [{ userId }, { userId: null }]
-        },
-        transaction
-      });
-
-      if (!category) {
-        throw createEntityNotFoundError('Categoria', data.categoryId);
-      }
-
-      // Criar a transação
-      const newTransaction = await TransactionInstance.create(
-        {
-          ...data,
+          id,
           userId
         },
-        { transaction }
-      );
+        include: {
+          category: true,
+          wallet: true
+        }
+      });
 
-      // Atualizar o saldo da carteira
-      if (data.transactionType === 'income') {
-        wallet.balance += data.amount;
-      } else if (data.transactionType === 'expense') {
-        wallet.balance -= data.amount;
+      if (!transaction) {
+        throw createEntityNotFoundError('Transação');
       }
 
-      await wallet.save({ transaction });
-
-      // Confirmar a transação no banco de dados
-      await transaction.commit();
-
-      // Buscar a transação completa com relacionamentos
-      return await TransactionInstance.findByPk(newTransaction.id, {
-        include: [
-          {
-            model: CategoryInstance,
-            as: 'category',
-            attributes: ['id', 'name', 'icon', 'color']
-          },
-          {
-            model: WalletInstance,
-            as: 'wallet',
-            attributes: ['id', 'name', 'icon', 'walletType']
-          }
-        ]
-      });
+      return transaction;
     } catch (error) {
-      // Reverter a transação em caso de erro
-      await transaction.rollback();
-      throw error;
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Erro ao buscar transação', 500);
     }
   }
 
   /**
-   * Atualizar uma transação existente
+   * Criar nova transação
    */
-  public static async updateTransaction(
-    id: number,
-    data: Partial<Omit<TransactionAttributes, 'id' | 'userId' | 'createdAt' | 'updatedAt'>>,
-    userId: number
+  public static async createTransaction(
+    userId: number,
+    data: {
+      description: string;
+      amount: number;
+      transactionDate: Date;
+      transactionType: 'income' | 'expense' | 'transfer';
+      categoryId: number;
+      walletId: number;
+      notes?: string;
+    }
   ) {
-    // Iniciar transação no banco de dados
-    const transaction = await sequelize.transaction();
-
     try {
-      // Buscar a transação existente
-      const existingTransaction = await TransactionInstance.findOne({
-        where: { id, userId },
-        transaction
-      });
-
-      if (!existingTransaction) {
-        throw createEntityNotFoundError('Transação', id);
-      }
-
-      // Se a carteira foi alterada, verificar se a nova carteira existe
-      if (data.walletId && data.walletId !== existingTransaction.walletId) {
-        const newWallet = await WalletInstance.findOne({
-          where: { id: data.walletId, userId },
-          transaction
-        });
-
-        if (!newWallet) {
-          throw createEntityNotFoundError('Carteira', data.walletId);
-        }
-
-        // Reverter o efeito da transação na carteira antiga
-        const oldWallet = await WalletInstance.findByPk(existingTransaction.walletId, { transaction });
-        if (oldWallet) {
-          if (existingTransaction.transactionType === 'income') {
-            oldWallet.balance -= existingTransaction.amount;
-          } else if (existingTransaction.transactionType === 'expense') {
-            oldWallet.balance += existingTransaction.amount;
-          }
-          await oldWallet.save({ transaction });
-        }
-
-        // Aplicar o efeito na nova carteira
-        const transactionType = data.transactionType || existingTransaction.transactionType;
-        const amount = data.amount || existingTransaction.amount;
-
-        if (transactionType === 'income') {
-          newWallet.balance += amount;
-        } else if (transactionType === 'expense') {
-          newWallet.balance -= amount;
-        }
-
-        await newWallet.save({ transaction });
-      }
-      // Se apenas o valor ou tipo foi alterado, atualizar o saldo da carteira atual
-      else if (data.amount !== undefined || data.transactionType !== undefined) {
-        const wallet = await WalletInstance.findByPk(existingTransaction.walletId, { transaction });
-        
-        if (wallet) {
-          // Reverter o efeito da transação antiga
-          if (existingTransaction.transactionType === 'income') {
-            wallet.balance -= existingTransaction.amount;
-          } else if (existingTransaction.transactionType === 'expense') {
-            wallet.balance += existingTransaction.amount;
-          }
-
-          // Aplicar o efeito da transação atualizada
-          const transactionType = data.transactionType || existingTransaction.transactionType;
-          const amount = data.amount !== undefined ? data.amount : existingTransaction.amount;
-
-          if (transactionType === 'income') {
-            wallet.balance += amount;
-          } else if (transactionType === 'expense') {
-            wallet.balance -= amount;
-          }
-
-          await wallet.save({ transaction });
-        }
-      }
-
-      // Se a categoria foi alterada, verificar se a nova categoria existe
-      if (data.categoryId && data.categoryId !== existingTransaction.categoryId) {
-        const category = await CategoryInstance.findOne({
-          where: {
-            id: data.categoryId,
-            [Op.or]: [{ userId }, { userId: null }]
-          },
-          transaction
+      return await prisma.$transaction(async (tx) => {
+        // Verificar se a categoria existe
+        const category = await tx.category.findUnique({
+          where: { id: data.categoryId }
         });
 
         if (!category) {
-          throw createEntityNotFoundError('Categoria', data.categoryId);
+          throw createEntityNotFoundError('Categoria');
         }
-      }
 
-      // Atualizar a transação
-      await existingTransaction.update(data, { transaction });
-
-      // Confirmar a transação no banco de dados
-      await transaction.commit();
-
-      // Buscar a transação atualizada com relacionamentos
-      return await TransactionInstance.findByPk(id, {
-        include: [
-          {
-            model: CategoryInstance,
-            as: 'category',
-            attributes: ['id', 'name', 'icon', 'color']
-          },
-          {
-            model: WalletInstance,
-            as: 'wallet',
-            attributes: ['id', 'name', 'icon', 'walletType']
+        // Verificar se a carteira existe e pertence ao usuário
+        const wallet = await tx.wallet.findFirst({
+          where: {
+            id: data.walletId,
+            userId
           }
-        ]
+        });
+
+        if (!wallet) {
+          throw createEntityNotFoundError('Carteira');
+        }
+
+        // Criar a transação
+        const transaction = await tx.transaction.create({
+          data: {
+            ...data,
+            userId
+          },
+          include: {
+            category: true,
+            wallet: true
+          }
+        });
+
+        // Atualizar saldo da carteira
+        await tx.wallet.update({
+          where: { id: data.walletId },
+          data: {
+            balance: {
+              increment: data.amount
+            }
+          }
+        });
+
+        return transaction;
       });
     } catch (error) {
-      // Reverter a transação em caso de erro
-      await transaction.rollback();
-      throw error;
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Erro ao criar transação', 500);
     }
   }
 
   /**
-   * Excluir uma transação
+   * Atualizar transação
    */
-  public static async deleteTransaction(id: number, userId: number) {
-    // Iniciar transação no banco de dados
-    const transaction = await sequelize.transaction();
-
+  public static async updateTransaction(
+    id: number,
+    userId: number,
+    data: {
+      description?: string;
+      amount?: number;
+      transactionDate?: Date;
+      transactionType?: 'income' | 'expense' | 'transfer';
+      categoryId?: number;
+      walletId?: number;
+      notes?: string;
+    }
+  ) {
     try {
-      // Buscar a transação
-      const existingTransaction = await TransactionInstance.findOne({
-        where: { id, userId },
-        transaction
-      });
+      return await prisma.$transaction(async (tx) => {
+        // Verificar se a transação existe e pertence ao usuário
+        const existingTransaction = await tx.transaction.findFirst({
+          where: {
+            id,
+            userId
+          }
+        });
 
-      if (!existingTransaction) {
-        throw createEntityNotFoundError('Transação', id);
-      }
-
-      // Atualizar o saldo da carteira
-      const wallet = await WalletInstance.findByPk(existingTransaction.walletId, { transaction });
-      
-      if (wallet) {
-        if (existingTransaction.transactionType === 'income') {
-          wallet.balance -= existingTransaction.amount;
-        } else if (existingTransaction.transactionType === 'expense') {
-          wallet.balance += existingTransaction.amount;
+        if (!existingTransaction) {
+          throw createEntityNotFoundError('Transação');
         }
 
-        await wallet.save({ transaction });
-      }
+        // Se mudou a carteira, atualizar saldos
+        if (data.walletId && data.walletId !== existingTransaction.walletId) {
+          const newWallet = await tx.wallet.findFirst({
+            where: {
+              id: data.walletId,
+              userId
+            }
+          });
 
-      // Excluir a transação
-      await existingTransaction.destroy({ transaction });
+          if (!newWallet) {
+            throw createEntityNotFoundError('Nova carteira');
+          }
 
-      // Confirmar a transação no banco de dados
-      await transaction.commit();
+          // Reverter o valor da carteira antiga
+          await tx.wallet.update({
+            where: { id: existingTransaction.walletId },
+            data: {
+              balance: {
+                decrement: existingTransaction.amount
+              }
+            }
+          });
 
-      return { success: true };
+          // Aplicar o novo valor na nova carteira
+          await tx.wallet.update({
+            where: { id: data.walletId },
+            data: {
+              balance: {
+                increment: data.amount || existingTransaction.amount
+              }
+            }
+          });
+        } else if (data.amount && data.amount !== existingTransaction.amount) {
+          // Se mudou apenas o valor, ajustar a diferença
+          const difference = data.amount - existingTransaction.amount;
+          await tx.wallet.update({
+            where: { id: existingTransaction.walletId },
+            data: {
+              balance: {
+                increment: difference
+              }
+            }
+          });
+        }
+
+        // Verificar categoria se foi alterada
+        if (data.categoryId) {
+          const category = await tx.category.findUnique({
+            where: { id: data.categoryId }
+          });
+
+          if (!category) {
+            throw createEntityNotFoundError('Categoria');
+          }
+        }
+
+        // Atualizar a transação
+        const updatedTransaction = await tx.transaction.update({
+          where: { id },
+          data,
+          include: {
+            category: true,
+            wallet: true
+          }
+        });
+
+        return updatedTransaction;
+      });
     } catch (error) {
-      // Reverter a transação em caso de erro
-      await transaction.rollback();
-      throw error;
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Erro ao atualizar transação', 500);
+    }
+  }
+
+  /**
+   * Deletar transação
+   */
+  public static async deleteTransaction(id: number, userId: number) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        // Verificar se a transação existe e pertence ao usuário
+        const existingTransaction = await tx.transaction.findFirst({
+          where: {
+            id,
+            userId
+          }
+        });
+
+        if (!existingTransaction) {
+          throw createEntityNotFoundError('Transação');
+        }
+
+        // Reverter o valor da carteira
+        await tx.wallet.update({
+          where: { id: existingTransaction.walletId },
+          data: {
+            balance: {
+              decrement: existingTransaction.amount
+            }
+          }
+        });
+
+        // Deletar a transação
+        await tx.transaction.delete({
+          where: { id }
+        });
+
+        return { message: 'Transação deletada com sucesso' };
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Erro ao deletar transação', 500);
     }
   }
 
   /**
    * Obter resumo mensal de transações
    */
-  public static async getMonthlyTransactionSummary(userId: number, year: number, month: number) {
-    // Calcular datas de início e fim do mês
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+  public static async getMonthlySummary(
+    userId: number,
+    year?: number,
+    month?: number
+  ) {
+    try {
+      const currentDate = new Date();
+      const targetYear = year || currentDate.getFullYear();
+      const targetMonth = month || currentDate.getMonth() + 1;
 
-    // Buscar transações do mês
-    const transactions = await TransactionInstance.findAll({
-      where: {
-        userId,
-        transactionDate: {
-          [Op.between]: [startDate, endDate]
+      const startDate = new Date(targetYear, targetMonth - 1, 1);
+      const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59);
+
+      const transactions = await prisma.transaction.findMany({
+        where: {
+          userId,
+          transactionDate: {
+            gte: startDate,
+            lte: endDate
+          }
         }
-      },
-      include: [
-        {
-          model: CategoryInstance,
-          as: 'category',
-          attributes: ['id', 'name', 'icon', 'color']
+      });
+
+      const summary = {
+        totalIncome: 0,
+        totalExpense: 0,
+        totalTransactions: transactions.length,
+        balance: 0
+      };
+
+      transactions.forEach((transaction) => {
+        if (transaction.amount > 0) {
+          summary.totalIncome += transaction.amount;
+        } else {
+          summary.totalExpense += Math.abs(transaction.amount);
         }
-      ]
-    });
+      });
 
-    // Calcular totais
-    let totalIncome = 0;
-    let totalExpense = 0;
+      summary.balance = summary.totalIncome - summary.totalExpense;
 
-    transactions.forEach(transaction => {
-      if (transaction.transactionType === 'income') {
-        totalIncome += parseFloat(transaction.amount.toString());
-      } else if (transaction.transactionType === 'expense') {
-        totalExpense += parseFloat(transaction.amount.toString());
-      }
-    });
-
-    // Calcular saldo
-    const balance = totalIncome - totalExpense;
-
-    return {
-      year,
-      month,
-      totalIncome,
-      totalExpense,
-      balance,
-      transactionCount: transactions.length
-    };
+      return summary;
+    } catch (error) {
+      throw new AppError('Erro ao obter resumo mensal', 500);
+    }
   }
 
   /**
@@ -441,72 +395,70 @@ export class TransactionService {
       startDate?: Date;
       endDate?: Date;
       type?: 'income' | 'expense';
-    }
+    } = {}
   ) {
-    const { startDate, endDate, type = 'expense' } = filters;
-
-    // Construir condições de busca
-    const where: any = {
-      userId,
-      transactionType: type
-    };
-
-    if (startDate) {
-      where.transactionDate = {
-        ...where.transactionDate,
-        [Op.gte]: startDate
+    try {
+      const where: any = {
+        userId
       };
-    }
 
-    if (endDate) {
-      where.transactionDate = {
-        ...where.transactionDate,
-        [Op.lte]: endDate
-      };
-    }
-
-    // Buscar transações agrupadas por categoria
-    const categorySummary = await TransactionInstance.findAll({
-      attributes: [
-        'categoryId',
-        [sequelize.fn('SUM', sequelize.col('amount')), 'total']
-      ],
-      where,
-      include: [
-        {
-          model: CategoryInstance,
-          as: 'category',
-          attributes: ['name', 'icon', 'color']
+      if (filters.startDate || filters.endDate) {
+        where.transactionDate = {};
+        if (filters.startDate) {
+          where.transactionDate.gte = filters.startDate;
         }
-      ],
-      group: ['categoryId', 'category.id', 'category.name', 'category.icon', 'category.color'],
-      order: [[sequelize.fn('SUM', sequelize.col('amount')), 'DESC']]
-    });
+        if (filters.endDate) {
+          where.transactionDate.lte = filters.endDate;
+        }
+      }
 
-    // Calcular total geral
-    const total = categorySummary.reduce((sum, item) => {
-      return sum + parseFloat((item.getDataValue('total') as any).toString());
-    }, 0);
+      if (filters.type) {
+        where.transactionType = filters.type;
+      }
 
-    // Formatar resultado com percentuais
-    return {
-      type,
-      total,
-      categories: categorySummary.map(item => {
-        const categoryTotal = parseFloat((item.getDataValue('total') as any).toString());
-        const percentage = (categoryTotal / total) * 100;
-        
-        return {
-          categoryId: item.categoryId,
-          name: item.category?.name,
-          icon: item.category?.icon,
-          color: item.category?.color,
-          total: categoryTotal,
-          percentage
-        };
-      })
-    };
+      const categorySummary = await prisma.transaction.groupBy({
+        by: ['categoryId'],
+        where,
+        _sum: {
+          amount: true
+        },
+        _count: {
+          id: true
+        }
+      });
+
+      // Buscar informações das categorias
+      const categoryIds = categorySummary.map(item => item.categoryId);
+      const categories = await prisma.category.findMany({
+        where: {
+          id: {
+            in: categoryIds
+          }
+        }
+      });
+
+      const total = categorySummary.reduce((sum, item) => {
+        return sum + Math.abs(item._sum.amount || 0);
+      }, 0);
+
+      return {
+        categories: categorySummary.map(item => {
+          const category = categories.find(cat => cat.id === item.categoryId);
+          return {
+            categoryId: item.categoryId,
+            categoryName: category?.name || 'Categoria não encontrada',
+            categoryIcon: category?.icon || '❓',
+            categoryColor: category?.color || '#gray',
+            totalAmount: Math.abs(item._sum.amount || 0),
+            transactionCount: item._count.id,
+            percentage: total > 0 ? (Math.abs(item._sum.amount || 0) / total) * 100 : 0
+          };
+        }),
+        total
+      };
+    } catch (error) {
+      throw new AppError('Erro ao obter resumo por categoria', 500);
+    }
   }
 }
 
-export default TransactionService;

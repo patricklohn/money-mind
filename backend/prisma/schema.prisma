@@ -7,7 +7,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://postgres:Pkl%2f123@localhost:5432/money-mind?schema=public"
+  url      = env("DATABASE_URL")
 }
 
 // Modelo de usuário
