@@ -1,0 +1,139 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://postgres:Pkl%2f123@localhost:5432/money-mind?schema=public"
+}
+
+// Modelo de usuário
+model User {
+  id            Int           @id @default(autoincrement())
+  email         String        @unique
+  name          String
+  password      String
+  isAdmin       Boolean       @default(false)
+  mfaEnabled    Boolean       @default(false)
+  mfaSecret     String?
+  profileImage  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  // Relações
+  transactions  Transaction[]
+  goals         Goal[]
+  wallets       Wallet[]
+  achievements  Achievement[]
+
+  @@map("users")
+}
+
+// Modelo de transação
+model Transaction {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  description     String
+  amount          Float
+  transactionDate DateTime
+  transactionType String    // 'income', 'expense', 'transfer'
+  categoryId      Int
+  walletId        Int
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relações
+  user            User      @relation(fields: [userId], references: [id])
+  category        Category  @relation(fields: [categoryId], references: [id])
+  wallet          Wallet    @relation(fields: [walletId], references: [id])
+
+  @@index([userId])
+  @@index([categoryId])
+  @@index([walletId])
+  @@index([transactionDate])
+  @@map("transactions")
+}
+
+// Modelo de categoria
+model Category {
+  id          Int           @id @default(autoincrement())
+  name        String
+  icon        String
+  color       String
+  type        String        // 'income', 'expense', 'both'
+  isDefault   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  // Relações
+  transactions Transaction[]
+
+  @@map("categories")
+}
+
+// Modelo de carteira
+model Wallet {
+  id          Int           @id @default(autoincrement())
+  userId      Int
+  name        String
+  icon        String
+  balance     Float         @default(0)
+  type        String        // 'cash', 'bank', 'credit', 'investment'
+  isDefault   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  // Relações
+  user        User          @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+// Modelo de meta financeira
+model Goal {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  title         String
+  description   String?
+  targetAmount  Float
+  currentAmount Float     @default(0)
+  deadline      DateTime?
+  icon          String
+  color         String
+  isCompleted   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relações
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("goals")
+}
+
+// Modelo de conquista
+model Achievement {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  title       String
+  description String
+  icon        String
+  points      Int       @default(10)
+  achievedAt  DateTime  @default(now())
+  category    String    // 'savings', 'investment', 'budget', 'goals', 'streak'
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relações
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([category])
+  @@map("achievements")
+}
